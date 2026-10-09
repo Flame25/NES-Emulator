@@ -189,7 +189,7 @@ uint8_t olc6502::IMP() {
   return 0;
 }
 
-// Expected next byte to be used as operand.
+// Expected next byte to be used as operand address.
 uint8_t olc6502::IMM() {
   addr_abs = pc++;
   return 0;
@@ -218,6 +218,7 @@ uint8_t olc6502::ZPY() {
   return 0;
 }
 
+// Full 16 bit address to be loaded and used
 uint8_t olc6502::ABS() {
   uint16_t lo = read(pc);
   pc++;
@@ -238,9 +239,100 @@ uint8_t olc6502::ABX() {
   addr_abs = (hi << 8) | lo;
   addr_abs += x;
 
+  // If after adding with X we are changing pages
   if ((addr_abs & 0xFF00) != (hi << 8)) {
     return 1;
   } else {
     return 0;
   }
 }
+
+uint8_t olc6502::ABY() {
+  uint16_t lo = read(pc);
+  pc++;
+  uint16_t hi = read(pc);
+  pc++;
+
+  addr_abs = (hi << 8) | lo;
+  addr_abs += y;
+
+  // If after adding with X we are changing pages
+  if ((addr_abs & 0xFF00) != (hi << 8)) {
+    return 1;
+  } else {
+    return 0;
+  }
+}
+
+// Supply 16 bit address to get the actual 16 bit address
+// some address -> real/actual used address.
+// There is bug where when low byte of the pointing address 0xFF, then we must
+// need to cross page boundary. In real 6052 doesnt work instead it wraps back
+// to same page.
+uint8_t olc6502::IND() {
+
+  uint16_t ptr_lo = read(pc);
+  pc++;
+  uint16_t ptr_hi = read(pc);
+  pc++;
+
+  uint16_t ptr = (ptr_hi << 8) | ptr_lo;
+
+  if (ptr_lo == 0xFF) {
+    addr_abs = (read(ptr & 0xFF00) << 8) | read(ptr + 0);
+  } else {
+    addr_abs = (read(ptr + 1) << 8) | read(ptr + 0);
+  }
+
+  return 0;
+}
+
+// 8 bit address offset by X register to index a location on page 0x00. The real
+// 16 bit address is read from this location
+uint8_t olc6502::IZX() {
+  uint16_t t = read(pc);
+  pc++;
+
+  uint16_t lo = read((uint16_t)(t + (uint16_t)x) & 0x00FF);
+  uint16_t hi = read((uint16_t)(t + (uint16_t)x + 1) & 0x00FF);
+
+  addr_abs = (hi << 8) | lo;
+
+  return 0;
+}
+
+// Kinda diff with IZX, we offset real address with Y. Therefore, cross paging
+// can possible and need more cycle
+uint8_t olc6502::IZY() {
+  uint16_t t = read(pc);
+  pc++;
+
+  uint16_t lo = read(t & 0x00FF);
+  uint16_t hi = read((t + 1) & 0x00FF);
+
+  addr_abs = (hi << 8) | lo;
+  addr_abs += y;
+
+  if ((addr_abs & 0xFF00) != (hi << 8)) {
+    return 1;
+  } else {
+    return 0;
+  }
+}
+
+// Address must be inside range of -128 to + 127 of the branch instruction
+uint8_t olc6502::REL() {
+  addr_rel = read(pc);
+  pc++;
+
+  // 0x80 -> 10000000. So we are checking whether the offset is minus or plus
+  if (addr_rel & 0x80) {
+    // Sign extension so we keep same value but extend this to signed 16 bit
+    // from 8 signed bit
+    addr_rel |= 0xFF00;
+  }
+
+  return 0;
+}
+
+// Instructions
