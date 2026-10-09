@@ -336,3 +336,130 @@ uint8_t olc6502::REL() {
 }
 
 // Instructions
+
+uint8_t olc6502::fetch() {
+  if (!(lookup[opcode].addrmode == &olc6502::IMP)) {
+    fetched = read(addr_abs);
+  }
+  return fetched;
+}
+
+uint8_t olc6502::AND() {
+  fetch();
+  a = a & fetched;
+  SetFlag(Z, a == 0x00);
+  SetFlag(N, a & 0x80);
+  return 1;
+}
+
+// Branching to some address based on Carry flag
+uint8_t olc6502::BCS() {
+  if (GetFlag(C) == 1) {
+    addr_abs = pc + addr_rel;
+
+    if ((addr_abs & 0x00FF) != (pc & 0x00FF)) {
+      cycles++;
+    }
+
+    pc = addr_abs;
+  }
+
+  return 0;
+}
+
+// Branch on Carry flag clear
+uint8_t olc6502::BCC() {
+  if (GetFlag(C) == 0) {
+    cycles++;
+    addr_abs = pc + addr_rel;
+
+    if ((addr_abs & 0xFF00) != (pc & 0xFF00))
+      cycles++;
+
+    pc = addr_abs;
+  }
+  return 0;
+}
+
+// Branch on result equal zero
+uint8_t olc6502::BEQ() {
+  if (GetFlag(Z) == 1) {
+    cycles++;
+    addr_abs = pc + addr_rel;
+
+    if ((addr_abs & 0xFF00) != (pc & 0xFF00))
+      cycles++;
+
+    pc = addr_abs;
+  }
+  return 0;
+}
+
+uint8_t olc6502::BNE() {
+  if (GetFlag(Z) == 0) {
+    cycles++;
+    addr_abs = pc + addr_rel;
+
+    if ((addr_abs & 0xFF00) != (pc & 0xFF00))
+      cycles++;
+
+    pc = addr_abs;
+  }
+  return 0;
+}
+
+// Branch on result minus
+uint8_t olc6502::BMI() {
+  if (GetFlag(N) == 1) {
+    cycles++;
+    addr_abs = pc + addr_rel;
+
+    if ((addr_abs & 0xFF00) != (pc & 0xFF00))
+      cycles++;
+
+    pc = addr_abs;
+  }
+  return 0;
+}
+
+// Branch on result plus
+uint8_t olc6502::BPL() {
+  if (GetFlag(N) == 0) {
+    cycles++;
+    addr_abs = pc + addr_rel;
+
+    if ((addr_abs & 0xFF00) != (pc & 0xFF00))
+      cycles++;
+
+    pc = addr_abs;
+  }
+  return 0;
+}
+
+// Branch on overflow clear
+uint8_t olc6502::BVC() {
+  if (GetFlag(V) == 0) {
+    cycles++;
+    addr_abs = pc + addr_rel;
+
+    if ((addr_abs & 0xFF00) != (pc & 0xFF00))
+      cycles++;
+
+    pc = addr_abs;
+  }
+  return 0;
+}
+
+// Branch on overflow set
+uint8_t olc6502::BVS() {
+  if (GetFlag(V) == 1) {
+    cycles++;
+    addr_abs = pc + addr_rel;
+
+    if ((addr_abs & 0xFF00) != (pc & 0xFF00))
+      cycles++;
+
+    pc = addr_abs;
+  }
+  return 0;
+}
