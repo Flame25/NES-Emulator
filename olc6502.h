@@ -6,6 +6,7 @@
 // For learning purposes.
 
 #include <cstdint>
+#include <map>
 #include <string>
 #include <vector>
 class Bus;
@@ -139,6 +140,10 @@ public:
   uint8_t cycles = 0; // Counts how many cycles the instruction has remaining
   uint32_t clock_count = 0; // Global sum of number of clocks
   uint16_t temp = 0x0000;
+
+  bool complete();
+
+  std::map<uint16_t, std::string> disassemble(uint16_t nStart, uint16_t nStop);
 
 private:
   Bus *bus = nullptr;
