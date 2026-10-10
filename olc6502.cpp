@@ -463,3 +463,470 @@ uint8_t olc6502::BVS() {
   }
   return 0;
 }
+
+// Clear carry flag
+uint8_t olc6502::CLC() {
+  SetFlag(C, false);
+  return 0;
+}
+
+// Clear decimal flag
+uint8_t olc6502::CLD() {
+  SetFlag(D, false);
+  return 0;
+}
+
+// Clear/disable Interrupt flag
+uint8_t olc6502::CLI() {
+  SetFlag(I, false);
+  return 0;
+}
+
+// Clear overflow flag
+uint8_t olc6502::CLV() {
+  SetFlag(V, false);
+  return 0;
+}
+
+// Add with Carry flag
+// Data or operands used in this operation should be all 8-bit. But, inside of
+// the implementation calculated in 16-bit. Result will withing 8-bit as well
+// and carry flag will 1 if the result more than 255 (8-bit)
+uint8_t olc6502::ADC() {
+  fetch();
+
+  temp = (uint16_t)a + (uint16_t)fetched + (uint16_t)GetFlag(C);
+  SetFlag(C, temp > 255);
+  SetFlag(Z, (temp & 0x00FF) == 0);
+  SetFlag(N, temp & 0x80);
+  SetFlag(
+      V, (~((uint16_t)a ^ (uint16_t)fetched) & ((uint16_t)a ^ (uint16_t)temp)) &
+             0x0080);
+
+  a = temp & 0x00FF;
+  return 1;
+}
+
+uint8_t olc6502::SBC() {
+  fetch();
+
+  uint16_t value = ((uint16_t)fetched) ^ 0x00FF;
+
+  temp = (uint16_t)a + value + (uint16_t)GetFlag(C);
+  SetFlag(C, temp & 0xFF00);
+  SetFlag(Z, ((temp & 0x00FF) == 0));
+  SetFlag(V, (temp ^ (uint16_t)a) & (temp ^ value) & 0x0080);
+  SetFlag(N, temp & 0x0080);
+  a = temp & 0x00FF;
+  return 1;
+}
+
+// Push Accumulator to stack
+uint8_t olc6502::PHA() {
+  write(0x0100 + stkp, a);
+  stkp--;
+  return 0;
+}
+
+uint8_t olc6502::PLA() {
+  stkp++;
+  a = read(0x0100 + stkp);
+  SetFlag(Z, a == 0x00);
+  SetFlag(N, a & 0x80);
+  return 0;
+}
+
+void olc6502::reset() {
+  a = 0;
+  x = 0;
+  y = 0;
+  stkp = 0xFD;
+  status = 0x00 | U;
+
+  // Look at this address when reset
+  addr_abs = 0xFFFC;
+  uint16_t lo = read(addr_abs + 0);
+  uint16_t hi = read(addr_abs + 1);
+
+  pc = (hi << 8) | lo;
+
+  addr_rel = 0x0000;
+  addr_abs = 0x0000;
+  fetched = 0x00;
+
+  cycles = 8;
+}
+
+// If some device need attention, we run irq so it reset but save current state
+// to stack first then will be recovered using RTI
+void olc6502::irq() {
+  if (GetFlag(I) == 0) {
+    write(0x100 + stkp, (pc >> 8) & 0x00FF);
+    stkp--;
+    write(0x100 + stkp, pc & 0x00FF);
+    stkp--;
+
+    SetFlag(B, 0);
+    SetFlag(U, 1);
+    SetFlag(I, 1);
+
+    write(0x100 + stkp, status);
+    stkp--;
+
+    // Read new program counter from fixed address
+    addr_abs = 0xFFFE;
+    uint16_t lo = read(addr_abs + 0);
+    uint16_t hi = read(addr_abs + 1);
+    pc = (hi << 8) | lo;
+
+    cycles = 7;
+  }
+}
+
+// Works like IRQ but this cannot be ignored therefore we dont check the
+// interrupt flag and diff fixed address
+void olc6502::nmi() {
+  write(0x0100 + stkp, (pc >> 8) & 0x00FF);
+  stkp--;
+  write(0x0100 + stkp, pc & 0x00FF);
+  stkp--;
+
+  SetFlag(B, 0);
+  SetFlag(U, 1);
+  SetFlag(I, 1);
+  write(0x0100 + stkp, status);
+  stkp--;
+
+  addr_abs = 0xFFFA;
+  uint16_t lo = read(addr_abs + 0);
+  uint16_t hi = read(addr_abs + 1);
+  pc = (hi << 8) | lo;
+
+  cycles = 8;
+}
+
+uint8_t olc6502::PLP() {
+  stkp++;
+  status = read(0x0100 + stkp);
+  SetFlag(U, 1);
+  return 0;
+}
+
+uint8_t olc6502::ROL() {
+  fetch();
+  temp = (uint16_t)(fetched << 1) | GetFlag(C);
+  SetFlag(C, temp & 0xFF00);
+  SetFlag(Z, (temp & 0x00FF) == 0x0000);
+  SetFlag(N, temp & 0x0080);
+  if (lookup[opcode].addrmode == &olc6502::IMP)
+    a = temp & 0x00FF;
+  else
+    write(addr_abs, temp & 0x00FF);
+  return 0;
+}
+
+uint8_t olc6502::ROR() {
+  fetch();
+  temp = (uint16_t)(GetFlag(C) << 7) | (fetched >> 1);
+  SetFlag(C, fetched & 0x01);
+  SetFlag(Z, (temp & 0x00FF) == 0x00);
+  SetFlag(N, temp & 0x0080);
+  if (lookup[opcode].addrmode == &olc6502::IMP)
+    a = temp & 0x00FF;
+  else
+    write(addr_abs, temp & 0x00FF);
+  return 0;
+}
+
+uint8_t olc6502::RTI() {
+  stkp++;
+  status = read(0x0100 + stkp);
+  status &= ~B;
+  status &= ~U;
+
+  stkp++;
+  pc = (uint16_t)read(0x0100 + stkp);
+  stkp++;
+  pc |= (uint16_t)read(0x0100 + stkp) << 8;
+  return 0;
+}
+
+uint8_t olc6502::RTS() {
+  stkp++;
+  pc = (uint16_t)read(0x0100 + stkp);
+  stkp++;
+  pc |= (uint16_t)read(0x0100 + stkp) << 8;
+
+  pc++;
+  return 0;
+}
+
+uint8_t olc6502::ORA() {
+  fetch();
+  a = a | fetched;
+  SetFlag(Z, a == 0x00);
+  SetFlag(N, a & 0x80);
+  return 1;
+}
+
+// Load Data to Accumulator
+uint8_t olc6502::LDA() {
+  fetch();
+  a = fetched;
+  SetFlag(Z, a == 0x00);
+  SetFlag(N, a & 0x80);
+  return 1;
+}
+
+// Load The X Register
+uint8_t olc6502::LDX() {
+  fetch();
+  x = fetched;
+  SetFlag(Z, x == 0x00);
+  SetFlag(N, x & 0x80);
+  return 1;
+}
+
+// Load The Y Register
+uint8_t olc6502::LDY() {
+  fetch();
+  y = fetched;
+  SetFlag(Z, y == 0x00);
+  SetFlag(N, y & 0x80);
+  return 1;
+}
+
+uint8_t olc6502::LSR() {
+  fetch();
+  SetFlag(C, fetched & 0x0001);
+  temp = fetched >> 1;
+  SetFlag(Z, (temp & 0x00FF) == 0x0000);
+  SetFlag(N, temp & 0x0080);
+  if (lookup[opcode].addrmode == &olc6502::IMP)
+    a = temp & 0x00FF;
+  else
+    write(addr_abs, temp & 0x00FF);
+  return 0;
+}
+
+// Jump To Location
+uint8_t olc6502::JMP() {
+  pc = addr_abs;
+  return 0;
+}
+
+// Jump To Sub-Routine
+// Push current pc to stack, pc = address
+uint8_t olc6502::JSR() {
+  pc--;
+
+  write(0x0100 + stkp, (pc >> 8) & 0x00FF);
+  stkp--;
+  write(0x0100 + stkp, pc & 0x00FF);
+  stkp--;
+
+  pc = addr_abs;
+  return 0;
+}
+
+uint8_t olc6502::INX() {
+  x++;
+  SetFlag(Z, x == 0x00);
+  SetFlag(N, x & 0x80);
+  return 0;
+}
+
+uint8_t olc6502::INY() {
+  y++;
+  SetFlag(Z, y == 0x00);
+  SetFlag(N, y & 0x80);
+  return 0;
+}
+
+uint8_t olc6502::INC() {
+  fetch();
+  temp = fetched + 1;
+  write(addr_abs, temp & 0x00FF);
+  SetFlag(Z, (temp & 0x00FF) == 0x0000);
+  SetFlag(N, temp & 0x0080);
+  return 0;
+}
+
+uint8_t olc6502::DEC() {
+  fetch();
+  temp = fetched - 1;
+  write(addr_abs, temp & 0x00FF);
+  SetFlag(Z, (temp & 0x00FF) == 0x0000);
+  SetFlag(N, temp & 0x0080);
+  return 0;
+}
+
+uint8_t olc6502::DEY() {
+  y--;
+  SetFlag(Z, y == 0x00);
+  SetFlag(N, y & 0x80);
+  return 0;
+}
+
+uint8_t olc6502::DEX() {
+  x--;
+  SetFlag(Z, x == 0x00);
+  SetFlag(N, x & 0x80);
+  return 0;
+}
+
+// Bitwise Logic XOR
+uint8_t olc6502::EOR() {
+  fetch();
+  a = a ^ fetched;
+  SetFlag(Z, a == 0x00);
+  SetFlag(N, a & 0x80);
+  return 1;
+}
+
+uint8_t olc6502::CPY() {
+  fetch();
+  temp = (uint16_t)y - (uint16_t)fetched;
+  SetFlag(C, y >= fetched);
+  SetFlag(Z, (temp & 0x00FF) == 0x0000);
+  SetFlag(N, temp & 0x0080);
+  return 0;
+}
+
+uint8_t olc6502::CPX() {
+  fetch();
+  temp = (uint16_t)x - (uint16_t)fetched;
+  SetFlag(C, x >= fetched);
+  SetFlag(Z, (temp & 0x00FF) == 0x0000);
+  SetFlag(N, temp & 0x0080);
+  return 0;
+}
+
+uint8_t olc6502::CMP() {
+  fetch();
+  temp = (uint16_t)a - (uint16_t)fetched;
+  SetFlag(C, a >= fetched);
+  SetFlag(Z, (temp & 0x00FF) == 0x0000);
+  SetFlag(N, temp & 0x0080);
+  return 1;
+}
+
+uint8_t olc6502::BRK() {
+  pc++;
+
+  SetFlag(I, 1);
+  write(0x0100 + stkp, (pc >> 8) & 0x00FF);
+  stkp--;
+  write(0x0100 + stkp, pc & 0x00FF);
+  stkp--;
+
+  SetFlag(B, 1);
+  write(0x0100 + stkp, status);
+  stkp--;
+  SetFlag(B, 0);
+
+  pc = (uint16_t)read(0xFFFE) | ((uint16_t)read(0xFFFF) << 8);
+  return 0;
+}
+
+uint8_t olc6502::ASL() {
+  fetch();
+  temp = (uint16_t)fetched << 1;
+  SetFlag(C, (temp & 0xFF00) > 0);
+  SetFlag(Z, (temp & 0x00FF) == 0x00);
+  SetFlag(N, temp & 0x80);
+  if (lookup[opcode].addrmode == &olc6502::IMP)
+    a = temp & 0x00FF;
+  else
+    write(addr_abs, temp & 0x00FF);
+  return 0;
+}
+
+// Set Carry Flag
+uint8_t olc6502::SEC() {
+  SetFlag(C, true);
+  return 0;
+}
+
+// Set Decimal Flag
+uint8_t olc6502::SED() {
+  SetFlag(D, true);
+  return 0;
+}
+
+// Set Interrupt Flag / Enable Interrupts
+uint8_t olc6502::SEI() {
+  SetFlag(I, true);
+  return 0;
+}
+
+// Store Accumulator at Address
+uint8_t olc6502::STA() {
+  write(addr_abs, a);
+  return 0;
+}
+
+// Store X Register at Address
+uint8_t olc6502::STX() {
+  write(addr_abs, x);
+  return 0;
+}
+
+// Store Y Register at Address
+uint8_t olc6502::STY() {
+  write(addr_abs, y);
+  return 0;
+}
+
+// Transfer Accumulator to X Register
+uint8_t olc6502::TAX() {
+  x = a;
+  SetFlag(Z, x == 0x00);
+  SetFlag(N, x & 0x80);
+  return 0;
+}
+
+// Transfer Accumulator to Y Register
+uint8_t olc6502::TAY() {
+  y = a;
+  SetFlag(Z, y == 0x00);
+  SetFlag(N, y & 0x80);
+  return 0;
+}
+
+// Transfer Stack Pointer to X Register
+uint8_t olc6502::TSX() {
+  x = stkp;
+  SetFlag(Z, x == 0x00);
+  SetFlag(N, x & 0x80);
+  return 0;
+}
+
+// Transfer X Register to Accumulator
+uint8_t olc6502::TXA() {
+  a = x;
+  SetFlag(Z, a == 0x00);
+  SetFlag(N, a & 0x80);
+  return 0;
+}
+
+// Transfer X Register to Stack Pointer
+uint8_t olc6502::TXS() {
+  stkp = x;
+  return 0;
+}
+
+// Transfer Y Register to Accumulator
+uint8_t olc6502::TYA() {
+  a = y;
+  SetFlag(Z, a == 0x00);
+  SetFlag(N, a & 0x80);
+  return 0;
+}
+
+// This function captures illegal opcodes
+uint8_t olc6502::XXX() {
+  return 0;
+}
+
+// Helper Function

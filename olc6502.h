@@ -17,6 +17,12 @@ public:
 
 public:
   enum FLAGS6502 {
+
+    // Note: Carry only can be either 1 and 0 even though this used for add and
+    // sub. The reason because for 8-bit addition the biggest number can be
+    // reached is 0x01FF by 255 + 255 + 1 (carry bit). Therefore carry bit will
+    // be either 0x00
+    // or 0x01.
     C = (1 << 0), // Carry Bit
     Z = (1 << 1), // Zero
     I = (1 << 2), // Disable Interrupt
@@ -35,7 +41,9 @@ public:
   uint16_t pc = 0x0000;  // Program Counter
   uint8_t status = 0x00; // Status Register
 
-  void ConnectBus(Bus *n) { bus = n; }
+  void ConnectBus(Bus *n) {
+    bus = n;
+  }
 
   // Addressing Modes
   // -> method the CPU uses to determine where/how to get the operand for each
@@ -130,6 +138,7 @@ public:
   uint8_t opcode = 0x00;      // Current opcode running
   uint8_t cycles = 0; // Counts how many cycles the instruction has remaining
   uint32_t clock_count = 0; // Global sum of number of clocks
+  uint16_t temp = 0x0000;
 
 private:
   Bus *bus = nullptr;
