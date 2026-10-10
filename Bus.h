@@ -14,7 +14,7 @@ public: // Devices on bus
 
   // Fake RAM
   // 6502 Has only up to 64Kb memory
-  std::array<uint16_t, 64 * 1028> ram;
+  std::array<uint8_t, 64 * 1024> ram;
 
 public: // Bus read & write
   // Based on olc6502 docs basically it write 8 bit data to 16 bit address
