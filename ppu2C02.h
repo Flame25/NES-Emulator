@@ -1,5 +1,6 @@
 #pragma once
 #include "Cartridge.h"
+#include "olcPixelGameEngine.h"
 #include <cstdint>
 #include <memory>
 
@@ -33,4 +34,28 @@ private:
 public:
   void ConnectCartridge(const std::shared_ptr<Cartridge> &cart);
   void clock();
+
+private:
+  int16_t scanline = 0;
+  int16_t cycle = 0;
+
+private:
+  olc::Pixel palScreen[0x40];
+  // In Video
+  // olc::Sprite sprScreen = olc::Sprite(256, 240);
+  // olc::Sprite sprNameTable[2] = { olc::Sprite(256, 240), olc::Sprite(256,
+  // 240) }; olc::Sprite sprPatternTable[2] = { olc::Sprite(128, 128),
+  // olc::Sprite(128, 128) };
+
+  // Changed To for API breaking subsequent PGE Update
+  olc::Sprite *sprScreen;
+  olc::Sprite *sprNameTable[2];
+  olc::Sprite *sprPatternTable[2];
+
+public:
+  // Debugging Utilities
+  olc::Sprite &GetScreen();
+  olc::Sprite &GetNameTable(uint8_t i);
+  olc::Sprite &GetPatternTable(uint8_t i);
+  bool frame_complete = false;
 };
