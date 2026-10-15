@@ -1,4 +1,5 @@
 #include "ppu2C02.h"
+#include "Cartridge.h"
 #include <cstdint>
 
 ppu2C02::ppu2C02() {
@@ -93,15 +94,74 @@ olc::Sprite &ppu2C02::GetNameTable(uint8_t i) {
   return *sprNameTable[i];
 }
 
-olc::Sprite &ppu2C02::GetPatternTable(uint8_t i) {
+// Basically this function read patter table from CHR ROM into olc::sprite. One
+// tile in NES are 2 pixels (4 color). So each entry in the ROM consisnt of only
+// 8 pallete to choose and each palette only contain 3 (color) + 1
+// (transparent).
+//
+// NES stores character using 2-bit pixels. This 2 pixel tile is coming from
+// addition of LSB bit plane + MSB bit plane. This will give us number 0-3 (4
+// colors) and pallete choosen will represent what color shown on that tile. The
+// planes are stored as 8 bytes of LSB, followed by 8 bytes of MSB
+
+// Loop through all 16x16 tiles
+olc::Sprite &ppu2C02::GetPatternTable(uint8_t i, uint8_t palette) {
+  for (uint16_t nTileY = 0; nTileY < 16; nTileY++) {
+    for (uint16_t nTileX = 0; nTileX < 16; nTileX++) {
+
+      // Convert 2D tile coordinate into 1D offset so we can read the memory as
+      // 1D array
+      uint16_t nOffset = nTileY * 256 + nTileX * 16;
+
+      for (uint16_t row = 0; row < 8; row++) {
+
+        // This implementation of what we said earlier. The lsb + msb part for
+        // each tile.
+        uint8_t tile_lsb = ppuRead(i * 0x1000 + nOffset + row + 0x0000);
+        uint8_t tile_msb = ppuRead(i * 0x1000 + nOffset + row + 0x0008);
+
+        for (uint16_t col = 0; col < 8; col++) {
+          uint8_t pixel = (tile_lsb & 0x01) + (tile_msb & 0x01);
+          tile_lsb >>= 1;
+          tile_msb >>= 1;
+
+          // We are using olc for the graphical representation basically this
+          // funct just set a color taken from pallete to a x,y post pixel.
+          sprPatternTable[i]->SetPixel(nTileX * 8 + (7 - col), nTileY * 8 + row,
+                                       GetColourFromPaletteRam(palette, pixel));
+        }
+      }
+    }
+  }
+  // Finally return the updated sprite representing the pattern table
   return *sprPatternTable[i];
+}
+
+// We are using the bus and ppu to read the table
+// pallete. We can just accessing tblPallete directly to take the color. But we
+// dont do this here instead we use ppuRead and let ppuRead accessing the table
+// pallete itself.
+//
+// For note: 0x3F00 - 0x3FFF is the start - end position for the table palette.
+
+olc::Pixel &ppu2C02::GetColourFromPaletteRam(uint8_t palette, uint8_t pixel) {
+
+  // Why palscreen var? Because this is somesort way olc do to simulate the
+  // table palette. Without this we need real NES disk to read/get data for the
+  // pallete.
+  //
+  // For reminder 0x3F basically just modulo to make sure the address will back
+  // around the range if its given more or larger than 0x3FFF
+  return palScreen[ppuRead(0x3F00 + (palette << 2) + pixel)];
 }
 
 void ppu2C02::cpuWrite(uint16_t addr, uint8_t data) {
   switch (addr) {
   case 0x0000: // Control
+    control.reg = data;
     break;
   case 0x0001: // Mask
+    mask.reg = data;
     break;
   case 0x0002: // Status
     break;
@@ -112,8 +172,17 @@ void ppu2C02::cpuWrite(uint16_t addr, uint8_t data) {
   case 0x0005: // Scroll
     break;
   case 0x0006: // PPU Address
+    if (address_latch == 0) {
+      ppu_address = (ppu_address & 0x00FF) | (data << 8);
+      address_latch = 1;
+    } else {
+      ppu_address = (ppu_address & 0xFF00) | data;
+      address_latch = 0;
+    }
     break;
   case 0x0007: // PPU Data
+    ppuWrite(ppu_address, data);
+    ppu_address++;
     break;
   }
 }
@@ -126,6 +195,9 @@ uint8_t ppu2C02::cpuRead(uint16_t addr, bool rdonly) {
   case 0x0001: // Mask
     break;
   case 0x0002: // Status
+    data = (status.reg & 0xE0) | (ppu_data_buffer & 0x1F);
+    status.vertical_blank = 0;
+    address_latch = 0;
     break;
   case 0x0003: // OAM Address
     break;
@@ -136,6 +208,18 @@ uint8_t ppu2C02::cpuRead(uint16_t addr, bool rdonly) {
   case 0x0006: // PPU Address
     break;
   case 0x0007: // PPU Data
+
+    // Reads from nametable ram get delayed one cycle.
+    // So the output is buffer which contain the data from previous read
+    // request.
+    data = ppu_data_buffer;
+    ppu_data_buffer = ppuRead(ppu_address);
+
+    // This spesical case for palette so we can get palette can be read within
+    // same cycle with some delay.
+    if (ppu_address > 0x3f00) {
+      data = ppu_data_buffer;
+    }
     break;
   }
   return data;
@@ -150,6 +234,23 @@ uint8_t ppu2C02::ppuRead(uint16_t addr, bool rdonly) {
   addr &= 0x3FFF;
 
   if (cart->ppuRead(addr, data)) {
+  } else if (addr >= 0x0000 && addr <= 0x1FFF) {
+    // Shifting 12 is either to get the index 0 or 1. So instad of we use
+    // address (hex) we use normal value so its either index 0 or 1 with some
+    // offset which we bitwise AND with 0x0FFF.
+    data = tblPattern[(addr & 0x1000) >> 12][addr & 0x0FFF];
+  } else if (addr >= 0x2000 && addr <= 0x3EFF) {
+  } else if (addr >= 0x3F00 && addr <= 0x3FFF) {
+    addr &= 0x001F;
+    if (addr == 0x0010)
+      addr = 0x0000;
+    if (addr == 0x0014)
+      addr = 0x0004;
+    if (addr == 0x0018)
+      addr = 0x0008;
+    if (addr == 0x001C)
+      addr = 0x000C;
+    data = tblPalette[addr];
   }
 
   return data;
@@ -159,10 +260,37 @@ void ppu2C02::ppuWrite(uint16_t addr, uint8_t data) {
   addr &= 0x3FFF;
 
   if (cart->ppuWrite(addr, data)) {
+  } else if (addr >= 0x0000 && addr <= 0x1FFF) {
+
+    tblPattern[(addr & 0x1000) >> 12][addr & 0x0FFF] = data;
+  } else if (addr >= 0x2000 && addr <= 0x3EFF) {
+
+  } else if (addr >= 0x3F00 && addr <= 0x3FFF) {
+    addr &= 0x001F;
+    if (addr == 0x0010)
+      addr = 0x0000;
+    if (addr == 0x0014)
+      addr = 0x0004;
+    if (addr == 0x0018)
+      addr = 0x0008;
+    if (addr == 0x001C)
+      addr = 0x000C;
+    tblPalette[addr] = data;
   }
 }
 
 void ppu2C02::clock() {
+
+  if (scanline == -1 && cycle == 1) {
+    status.vertical_blank = 0;
+  }
+
+  if (scanline == 241 && cycle == 1) {
+    status.vertical_blank = 1;
+    if (control.enable_nmi) {
+      nmi = true;
+    }
+  }
 
   // Fake some noise for now
   sprScreen->SetPixel(cycle - 1, scanline,
