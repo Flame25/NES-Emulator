@@ -152,7 +152,7 @@ olc::Pixel &ppu2C02::GetColourFromPaletteRam(uint8_t palette, uint8_t pixel) {
   //
   // For reminder 0x3F basically just modulo to make sure the address will back
   // around the range if its given more or larger than 0x3FFF
-  return palScreen[ppuRead(0x3F00 + (palette << 2) + pixel)];
+  return palScreen[ppuRead(0x3F00 + (palette << 2) + pixel) & 0x3F];
 }
 
 void ppu2C02::cpuWrite(uint16_t addr, uint8_t data) {
@@ -201,7 +201,7 @@ void ppu2C02::cpuWrite(uint16_t addr, uint8_t data) {
     // We dont write directly into vram but we write to tram first then
     // transferred it to vram
     if (address_latch == 0) {
-      tram_addr.reg = (tram_addr.reg & 0x00FF) | (data << 8);
+      tram_addr.reg = (uint16_t)((data & 0x3F) << 8) | (tram_addr.reg & 0x00FF);
       address_latch = 1;
     } else {
       tram_addr.reg = (tram_addr.reg & 0xFF00) | data;
@@ -246,7 +246,7 @@ uint8_t ppu2C02::cpuRead(uint16_t addr, bool rdonly) {
 
     // This spesical case for palette so we can get palette can be read within
     // same cycle with some delay.
-    if (vram_addr.reg > 0x3f00) {
+    if (vram_addr.reg > 0x3F00) {
       data = ppu_data_buffer;
     }
 
@@ -305,7 +305,7 @@ uint8_t ppu2C02::ppuRead(uint16_t addr, bool rdonly) {
       addr = 0x0008;
     if (addr == 0x001C)
       addr = 0x000C;
-    data = tblPalette[addr];
+    data = tblPalette[addr] & (mask.grayscale ? 0x30 : 0x3F);
   }
 
   return data;
@@ -564,4 +564,25 @@ void ppu2C02::clock() {
       frame_complete = true;
     }
   }
+}
+
+void ppu2C02::reset() {
+  fine_x = 0x00;
+  address_latch = 0x00;
+  ppu_data_buffer = 0x00;
+  scanline = 0;
+  cycle = 0;
+  bg_next_tile_id = 0x00;
+  bg_next_tile_attrib = 0x00;
+  bg_next_tile_lsb = 0x00;
+  bg_next_tile_msb = 0x00;
+  bg_shifter_pattern_lo = 0x0000;
+  bg_shifter_pattern_hi = 0x0000;
+  bg_shifter_attrib_lo = 0x0000;
+  bg_shifter_attrib_hi = 0x0000;
+  status.reg = 0x00;
+  mask.reg = 0x00;
+  control.reg = 0x00;
+  vram_addr.reg = 0x0000;
+  tram_addr.reg = 0x0000;
 }

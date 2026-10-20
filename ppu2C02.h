@@ -35,6 +35,7 @@ private:
 public:
   void ConnectCartridge(const std::shared_ptr<Cartridge> &cart);
   void clock();
+  void reset();
   bool nmi = false;
 
 private:
