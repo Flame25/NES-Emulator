@@ -61,3 +61,6 @@ bool Mapper_000::ppuMapWrite(uint16_t addr, uint32_t &mapped_addr) {
 
   return false;
 }
+
+void Mapper_000::reset() {
+}

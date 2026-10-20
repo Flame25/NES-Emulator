@@ -162,7 +162,7 @@ private:
 
   bool OnUserCreate() {
     // Load the cartridge
-    cart = std::make_shared<Cartridge>("./nestest.nes");
+    cart = std::make_shared<Cartridge>("./smb.nes");
 
     if (!cart->ImageValid())
       return false;
