@@ -163,7 +163,7 @@ private:
 
   bool OnUserCreate() {
     // Load the cartridge
-    cart = std::make_shared<Cartridge>("./smb.nes");
+    cart = std::make_shared<Cartridge>("./nestest.nes");
     if (!cart->ImageValid())
       return false;
 
@@ -249,6 +249,13 @@ private:
     DrawSprite(648, 348, &nes.ppu.GetPatternTable(1, nSelectedPalette));
 
     DrawSprite(0, 0, &nes.ppu.GetScreen(), 2);
+
+    // for (uint8_t y = 0; y < 30; y++) {
+    //   for (uint8_t x = 0; x < 32; x++) {
+    //     DrawString(x * 16, y * 16,
+    //                hex((uint32_t)nes.ppu.tblName[0][y * 32 + x], 2));
+    //   }
+    // }
     return true;
   }
 };

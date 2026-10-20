@@ -12,7 +12,6 @@ public:
 
 private:
   // One full name table is 1024. But, NES capable to store 2 fullname table.
-  uint8_t tblName[2][1024]; // "VRAM"
   uint8_t tblPalette[32];
 
   // This should be inside of the cartridge instead of the nes. For now this
@@ -20,6 +19,8 @@ private:
   uint8_t tblPattern[2][4096];
 
 public:
+  uint8_t tblName[2][1024]; // "VRAM"
+
   // Communications with main Bus
   uint8_t cpuRead(uint16_t addr, bool rdonly = false);
   void cpuWrite(uint16_t addr, uint8_t data);
@@ -80,9 +81,42 @@ private:
     uint8_t reg;
   } control;
 
-  uint8_t address_latch = 0x00;
+  union loopy_register {
+    // Credit to Loopy for working this out :D
+    struct {
+
+      // Coarse is for tile -> Each tile contain 8 pixel
+      // Fine is for pixel
+      uint16_t coarse_x : 5;
+      uint16_t coarse_y : 5;
+      uint16_t nametable_x : 1;
+      uint16_t nametable_y : 1;
+      uint16_t fine_y : 3;
+      uint16_t unused : 1;
+    };
+
+    uint16_t reg = 0x0000;
+  };
+
+  loopy_register vram_addr; // Active "pointer" address into nametable to
+                            // extract background tile info
+  loopy_register tram_addr; // Temporary store of information to be
+                            // "transferred" into "pointer" at various time
+
   uint8_t ppu_data_buffer = 0x00;
-  uint16_t ppu_address = 0x0000;
+  uint8_t fine_x = 0x00;
+
+  uint8_t address_latch = 0x00;
+
+  // Background rendering
+  uint8_t bg_next_tile_id = 0x00;
+  uint8_t bg_next_tile_attrib = 0x00;
+  uint8_t bg_next_tile_lsb = 0x00;
+  uint8_t bg_next_tile_msb = 0x00;
+  uint16_t bg_shifter_pattern_lo = 0x0000;
+  uint16_t bg_shifter_pattern_hi = 0x0000;
+  uint16_t bg_shifter_attrib_lo = 0x0000;
+  uint16_t bg_shifter_attrib_hi = 0x0000;
 
 private:
   olc::Pixel palScreen[0x40];
