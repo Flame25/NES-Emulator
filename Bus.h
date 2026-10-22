@@ -20,6 +20,8 @@ public: // Devices on bus
 
   std::shared_ptr<Cartridge> cart;
 
+  uint8_t controller[2];
+
 public: // Bus read & write
   // Based on 6502 docs basically it write 8 bit data to 16 bit address
   void cpuWrite(uint16_t addr, uint8_t data);
@@ -37,4 +39,6 @@ public: // System Interface
 private:
   // Accumulate how many clock function has been called
   uint32_t nSystemClockCounter = 0;
+
+  uint8_t controller_state[2];
 };
