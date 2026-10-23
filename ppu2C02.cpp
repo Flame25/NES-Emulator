@@ -587,7 +587,7 @@ void ppu2C02::clock() {
 
       for (uint8_t i = 0; i < sprite_count; i++) {
         uint8_t sprite_pattern_bits_lo, sprite_pattern_bits_hi;
-        uint8_t sprite_pattern_addr_lo, sprite_pattern_addr_hi;
+        uint16_t sprite_pattern_addr_lo, sprite_pattern_addr_hi;
 
         if (!control.sprite_size) {
 
