@@ -191,7 +191,7 @@ void ppu2C02::cpuWrite(uint16_t addr, uint8_t data) {
       // We are on tile 2 and pixels 3
       tram_addr.coarse_x = data >> 3;
       address_latch = 1;
-    } else if (address_latch == 1) {
+    } else {
       // First write to scroll register contains Y offset in pixel space
       // which we split into coarse and fine Y values
       tram_addr.fine_y = data & 0x07;
@@ -250,7 +250,7 @@ uint8_t ppu2C02::cpuRead(uint16_t addr, bool rdonly) {
 
     // This spesical case for palette so we can get palette can be read within
     // same cycle with some delay.
-    if (vram_addr.reg > 0x3F00) {
+    if (vram_addr.reg >= 0x3F00) {
       data = ppu_data_buffer;
     }
 
@@ -467,6 +467,7 @@ void ppu2C02::clock() {
       // Effectively start of new frame, so clear vertical blank flag
       status.vertical_blank = 0;
       status.sprite_overflow = 0;
+      status.sprite_zero_hit = 0;
 
       for (int i = 0; i < 8; i++) {
         sprite_shifter_pattern_hi[i] = 0;
@@ -570,9 +571,12 @@ void ppu2C02::clock() {
 
         if (diff >= 0 && diff < (control.sprite_size ? 16 : 8)) {
 
-          memcpy(&spriteScanline[sprite_count], &OAM[nOAMEntry],
-                 sizeof(sObjectAttributeEntry));
-          sprite_count++;
+          if (sprite_count < 8) {
+
+            memcpy(&spriteScanline[sprite_count], &OAM[nOAMEntry],
+                   sizeof(sObjectAttributeEntry));
+            sprite_count++;
+          }
         }
         nOAMEntry++;
       }

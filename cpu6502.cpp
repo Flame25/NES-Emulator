@@ -157,6 +157,8 @@ void cpu6502::clock() {
   if (cycles == 0) {
     opcode = read(pc);
     // When reading the pc we increase by 1 to prepared read the next address.
+
+    SetFlag(U, true);
     pc++;
 
     // Get num of cycles
@@ -168,7 +170,10 @@ void cpu6502::clock() {
     uint8_t additional_cycle2 = (this->*lookup[opcode].operate)();
 
     cycles += (additional_cycle1 & additional_cycle2);
+    SetFlag(U, true);
   }
+
+  clock_count++;
   cycles--;
 }
 

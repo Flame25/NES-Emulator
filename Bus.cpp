@@ -17,6 +17,11 @@ void Bus::cpuWrite(uint16_t addr, uint8_t data) {
     cpuRam[addr & 0x07FF] = data;
   } else if (addr >= 0x2000 && addr <= 0x3FFF) {
     ppu.cpuWrite(addr & 0x0007, data);
+  } else if (addr == 0x4014) {
+    // A write to this address initiates a DMA transfer
+    dma_page = data;
+    dma_addr = 0x00;
+    dma_transfer = true;
   } else if (addr >= 0x4016 && addr <= 0x4017) {
 
     // This & operation is to get which controller 0 or 1
@@ -48,10 +53,14 @@ uint8_t Bus::cpuRead(uint16_t addr, bool bReadOnly) {
 
 void Bus::reset() {
   cart->reset();
-  ppu.reset();
   cpu.reset();
-
+  ppu.reset();
   nSystemClockCounter = 0;
+  dma_page = 0x00;
+  dma_addr = 0x00;
+  dma_data = 0x00;
+  dma_dummy = true;
+  dma_transfer = false;
 }
 
 void Bus::insertCartridge(const std::shared_ptr<Cartridge> &cartridge) {
@@ -99,7 +108,6 @@ void Bus::clock() {
           }
         }
       }
-
     }
 
     else {
