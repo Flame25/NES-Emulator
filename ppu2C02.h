@@ -139,4 +139,41 @@ public:
   olc::Sprite &GetPatternTable(uint8_t i, uint8_t palette);
   olc::Pixel &GetColourFromPaletteRam(uint8_t palette, uint8_t pixel);
   bool frame_complete = false;
+
+private:
+  // Primary OAM = 256 bytes = 64 sprites x 4 bytes.
+  // Sprite n occupies OAM[n*4 + 0..3].
+  //
+  // Byte 0 "y"      : yyyy yyyy  top edge on screen (hardware draws at y+1)
+  // Byte 1 "id"     : tttt tttt  tile index into pattern table
+  // Byte 2 "attribute":
+  //
+  //      7   6   5   4   3   2   1   0
+  //    +---+---+---+---+---+---+---+---+
+  //    | V | H | P | - | - | - | p | p |
+  //    +---+---+---+---+---+---+---+---+
+  //
+  //   bits 1-0  pp : sprite palette 0-3 -> PPU $3F10 + pp*4 (colors
+  //   $3F11-$3F1F)
+  //   bits 4-2  -  : unused, PPU ignores / reads back 0
+  //   bit  5    P  : priority, 0 = in front of BG, 1 = behind BG
+  //   bit  6    H  : horizontal flip
+  //   bit  7    V  : vertical flip
+  struct sObjectAttributeEntry {
+    uint8_t y;
+    uint8_t id;
+    uint8_t attribute;
+    uint8_t x;
+  } OAM[64];
+
+  // This is basically sOAM
+  sObjectAttributeEntry spriteScanline[8];
+  uint8_t sprite_count;
+
+  uint8_t sprite_shifter_pattern_lo[8];
+  uint8_t sprite_shifter_pattern_hi[8];
+
+public:
+  uint8_t *pOAM = (uint8_t *)OAM;
+  uint8_t oam_addr = 0x00;
 };

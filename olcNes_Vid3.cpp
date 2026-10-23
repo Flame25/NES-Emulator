@@ -162,7 +162,7 @@ private:
 
   bool OnUserCreate() {
     // Load the cartridge
-    cart = std::make_shared<Cartridge>("./nestest.nes");
+    cart = std::make_shared<Cartridge>("./smb.nes");
 
     if (!cart->ImageValid())
       return false;
@@ -244,7 +244,16 @@ private:
     }
 
     DrawCpu(516, 2);
-    DrawCode(516, 72, 26);
+    // DrawCode(516, 72, 26);
+
+    for (int i = 0; i < 26; i++) {
+      std::string s = hex(i, 2) + ": (" +
+                      std::to_string(nes.ppu.pOAM[i * 4 + 3]) + ", " +
+                      std::to_string(nes.ppu.pOAM[i * 4 + 0]) + ") " +
+                      "ID: " + hex(nes.ppu.pOAM[i * 4 + 1], 2) +
+                      +" AT: " + hex(nes.ppu.pOAM[i * 4 + 2], 2);
+      DrawString(516, 72 + i * 10, s);
+    }
 
     // Draw Palettes & Pattern Tables
     // ==============================================

@@ -1,6 +1,7 @@
 #include "ppu2C02.h"
 #include "Cartridge.h"
 #include <cstdint>
+#include <cstring>
 
 ppu2C02::ppu2C02() {
   palScreen[0x00] = olc::Pixel(84, 84, 84);
@@ -121,7 +122,7 @@ olc::Sprite &ppu2C02::GetPatternTable(uint8_t i, uint8_t palette) {
         uint8_t tile_msb = ppuRead(i * 0x1000 + nOffset + row + 0x0008);
 
         for (uint16_t col = 0; col < 8; col++) {
-          uint8_t pixel = (tile_lsb & 0x01) + (tile_msb & 0x01);
+          uint8_t pixel = ((tile_lsb & 0x01) << 1) | (tile_msb & 0x01);
           tile_lsb >>= 1;
           tile_msb >>= 1;
 
@@ -168,8 +169,10 @@ void ppu2C02::cpuWrite(uint16_t addr, uint8_t data) {
   case 0x0002: // Status
     break;
   case 0x0003: // OAM Address
+    oam_addr = data;
     break;
   case 0x0004: // OAM Data
+    pOAM[oam_addr] = data;
     break;
   case 0x0005: // Scroll
     if (address_latch == 0) {
@@ -231,6 +234,7 @@ uint8_t ppu2C02::cpuRead(uint16_t addr, bool rdonly) {
   case 0x0003: // OAM Address
     break;
   case 0x0004: // OAM Data
+    data = pOAM[oam_addr];
     break;
   case 0x0005: // Scroll
     break;
@@ -440,6 +444,17 @@ void ppu2C02::clock() {
       bg_shifter_attrib_lo <<= 1;
       bg_shifter_attrib_hi <<= 1;
     }
+
+    if (mask.render_sprites && cycle >= 1 && cycle < 258) {
+      for (int i = 0; i < sprite_count; i++) {
+        if (spriteScanline[i].x > 0) {
+          spriteScanline[i].x--;
+        } else {
+          sprite_shifter_pattern_lo[i] <<= 1;
+          sprite_shifter_pattern_hi[i] <<= 1;
+        }
+      }
+    }
   };
 
   if (scanline >= -1 && scanline < 240) {
@@ -451,6 +466,12 @@ void ppu2C02::clock() {
     if (scanline == -1 && cycle == 1) {
       // Effectively start of new frame, so clear vertical blank flag
       status.vertical_blank = 0;
+      status.sprite_overflow = 0;
+
+      for (int i = 0; i < 8; i++) {
+        sprite_shifter_pattern_hi[i] = 0;
+        sprite_shifter_pattern_lo[i] = 0;
+      }
     }
 
     if ((cycle >= 2 && cycle < 258) || (cycle >= 321 && cycle < 338)) {
@@ -517,6 +538,160 @@ void ppu2C02::clock() {
       // End of vertical blank period so reset the Y address ready for rendering
       TransferAddressY();
     }
+
+    // Foreground Rendering
+
+    // This means we are already on the end of visible scanline. We need to
+    // prepare for the next sprite visible on the next scanline. Preload this
+    // info into buffers
+    if (cycle == 257 && scanline >= 0) {
+
+      // Clear / Wipe sprite memory. This will be used to store the sprited that
+      // will be rendered.
+      //
+      // Why only 8? Because NES only can save up to 8 sprites per time for
+      // rendering purposes.
+      std::memset(spriteScanline, 0xFF, 8 * sizeof(sObjectAttributeEntry));
+
+      sprite_count = 0;
+
+      for (uint8_t i = 0; i < 8; i++) {
+        sprite_shifter_pattern_lo[i] = 0;
+        sprite_shifter_pattern_hi[i] = 0;
+      }
+
+      // Check pOAM (64) with current scanline. If there is sprite or OAM entry
+      // that has y < 16 / 8 then it's possible that the sprite need being used.
+
+      // Sprite Evaluation Phase
+      uint8_t nOAMEntry = 0;
+      while (nOAMEntry < 64 && sprite_count < 9) {
+        int16_t diff = ((int16_t)scanline - (int16_t)OAM[nOAMEntry].y);
+
+        if (diff >= 0 && diff < (control.sprite_size ? 16 : 8)) {
+
+          memcpy(&spriteScanline[sprite_count], &OAM[nOAMEntry],
+                 sizeof(sObjectAttributeEntry));
+          sprite_count++;
+        }
+        nOAMEntry++;
+      }
+      status.sprite_overflow = (sprite_count > 8);
+    }
+
+    if (cycle == 340) {
+
+      for (uint8_t i = 0; i < sprite_count; i++) {
+        uint8_t sprite_pattern_bits_lo, sprite_pattern_bits_hi;
+        uint8_t sprite_pattern_addr_lo, sprite_pattern_addr_hi;
+
+        if (!control.sprite_size) {
+
+          // 8x8 Sprite Mode
+
+          if (!(spriteScanline[i].attribute & 0x80)) {
+
+            // Not Flipped
+            sprite_pattern_addr_lo =
+                (control.pattern_sprite
+                 << 12) | // Which Pattern Table 0KB or 4KB offset
+                (spriteScanline[i].id << 4) | // Which Cell (TileID * 16)
+                (scanline -
+                 spriteScanline[i]
+                     .y); // Cell Offset for spesific pixel info based on TileID
+          } else {
+
+            // Flipped
+            sprite_pattern_addr_lo =
+                (control.pattern_sprite
+                 << 12) // Which Pattern Table? 0KB or 4KB offset
+                | (spriteScanline[i].id
+                   << 4) // Which Cell? Tile ID * 16 (16 bytes per tile)
+                | (7 - (scanline -
+                        spriteScanline[i].y)); // Which Row in cell? (7->0)
+          }
+
+        } else {
+
+          // 8x16 Sprite Mode
+
+          if (!(spriteScanline[i].attribute & 0x80)) {
+            // Sprite is NOT flipped vertically, i.e. normal
+            if (scanline - spriteScanline[i].y < 8) {
+
+              // Reading Top half Tile
+              sprite_pattern_addr_lo =
+                  ((spriteScanline[i].id & 0x01)
+                   << 12) // Which Pattern Table? 0KB or 4KB offset
+                  | ((spriteScanline[i].id & 0xFE)
+                     << 4) // Which Cell? Tile ID * 16 (16 bytes per tile)
+                  | ((scanline - spriteScanline[i].y) &
+                     0x07); // Which Row in cell? (0->7)
+            } else {
+              // Reading Bottom Half Tile
+              sprite_pattern_addr_lo =
+                  ((spriteScanline[i].id & 0x01)
+                   << 12) // Which Pattern Table? 0KB or 4KB offset
+                  | (((spriteScanline[i].id & 0xFE) + 1)
+                     << 4) // Which Cell? Tile ID * 16 (16 bytes per tile)
+                  | ((scanline - spriteScanline[i].y) &
+                     0x07); // Which Row in cell? (0->7)
+            }
+          } else {
+
+            // Sprite is flipped vertically, i.e. upside down
+            if (scanline - spriteScanline[i].y < 8) {
+              // Reading Top half Tile
+              sprite_pattern_addr_lo =
+                  ((spriteScanline[i].id & 0x01)
+                   << 12) // Which Pattern Table? 0KB or 4KB offset
+                  | (((spriteScanline[i].id & 0xFE) + 1)
+                     << 4) // Which Cell? Tile ID * 16 (16 bytes per tile)
+                  | (7 - (scanline - spriteScanline[i].y) &
+                     0x07); // Which Row in cell? (0->7)
+            } else {
+              // Reading Bottom Half Tile
+              sprite_pattern_addr_lo =
+                  ((spriteScanline[i].id & 0x01)
+                   << 12) // Which Pattern Table? 0KB or 4KB offset
+                  | ((spriteScanline[i].id & 0xFE)
+                     << 4) // Which Cell? Tile ID * 16 (16 bytes per tile)
+                  | (7 - (scanline - spriteScanline[i].y) &
+                     0x07); // Which Row in cell? (0->7)
+            }
+          }
+        }
+
+        sprite_pattern_addr_hi = sprite_pattern_addr_lo + 8;
+
+        sprite_pattern_bits_lo = ppuRead(sprite_pattern_addr_lo);
+        sprite_pattern_bits_hi = ppuRead(sprite_pattern_addr_hi);
+
+        // If sprite is flipped horizontally
+
+        if (spriteScanline[i].attribute & 0x40) {
+
+          // This little lambda function "flips" a byte
+          // so 0b11100000 becomes 0b00000111. It's very
+          // clever, and stolen completely from here:
+          // https://stackoverflow.com/a/2602885
+          auto flipbyte = [](uint8_t b) {
+            b = (b & 0xF0) >> 4 | (b & 0x0F) << 4;
+            b = (b & 0xCC) >> 2 | (b & 0x33) << 2;
+            b = (b & 0xAA) >> 1 | (b & 0x55) << 1;
+            return b;
+          };
+
+          // Flip Patterns Horizontally
+          sprite_pattern_bits_lo = flipbyte(sprite_pattern_bits_lo);
+          sprite_pattern_bits_hi = flipbyte(sprite_pattern_bits_hi);
+        }
+
+        // Shifter -> its needed because ppu render 1 pixel per cycle
+        sprite_shifter_pattern_lo[i] = sprite_pattern_bits_lo;
+        sprite_shifter_pattern_hi[i] = sprite_pattern_bits_hi;
+      }
+    }
   }
 
   if (scanline == 240) {
@@ -551,8 +726,52 @@ void ppu2C02::clock() {
     bg_palette = (bg_pal1 << 1) | bg_pal0;
   }
 
+  uint8_t fg_pixel = 0x00;
+  uint8_t fg_palette = 0x00;
+  uint8_t fg_priority = 0x00;
+
+  if (mask.render_sprites) {
+    for (int i = 0; i < sprite_count; i++) {
+      if (spriteScanline[i].x == 0) {
+        uint8_t fg_pixel_lo = (sprite_shifter_pattern_lo[i] & 0x80) > 0;
+        uint8_t fg_pixel_hi = (sprite_shifter_pattern_hi[i] & 0x80) > 0;
+        fg_pixel = (fg_pixel_hi << 1) | fg_pixel_lo;
+
+        fg_palette = (spriteScanline[i].attribute & 0x03) + 0x04;
+        fg_priority = (spriteScanline[i].attribute & 0x20) == 0;
+
+        if (fg_pixel != 0) {
+          break;
+        }
+      }
+    }
+  }
+
+  uint8_t pixel = 0x00;
+  uint8_t palette = 0x00;
+
+  if (bg_pixel == 0 & fg_pixel == 0) {
+    pixel = 0x00;
+    palette = 0x00;
+  } else if (bg_pixel > 0 && fg_pixel == 0) {
+    pixel = bg_pixel;
+    palette = bg_palette;
+  } else if (fg_pixel > 0 && bg_pixel == 0) {
+    pixel = fg_pixel;
+    palette = fg_palette;
+  } else if (fg_pixel > 0 && bg_pixel > 0) {
+
+    if (fg_priority) {
+      pixel = fg_pixel;
+      palette = fg_palette;
+    } else {
+      pixel = bg_pixel;
+      palette = bg_palette;
+    }
+  }
+
   sprScreen->SetPixel(cycle - 1, scanline,
-                      GetColourFromPaletteRam(bg_palette, bg_pixel));
+                      GetColourFromPaletteRam(palette, pixel));
 
   // Advance renderer - it never stops, it's relentless
   cycle++;
