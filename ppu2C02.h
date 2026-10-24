@@ -175,6 +175,9 @@ private:
   uint8_t sprite_shifter_pattern_lo[8];
   uint8_t sprite_shifter_pattern_hi[8];
 
+  bool bSpriteZeroHitPossible = false;
+  bool bSpriteZeroBeingRendered = false;
+
 public:
   uint8_t *pOAM = (uint8_t *)OAM;
 };

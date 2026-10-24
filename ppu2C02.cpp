@@ -573,6 +573,9 @@ void ppu2C02::clock() {
 
           if (sprite_count < 8) {
 
+            if (nOAMEntry == 0)
+              bSpriteZeroHitPossible = true;
+
             memcpy(&spriteScanline[sprite_count], &OAM[nOAMEntry],
                    sizeof(sObjectAttributeEntry));
             sprite_count++;
@@ -735,6 +738,9 @@ void ppu2C02::clock() {
   uint8_t fg_priority = 0x00;
 
   if (mask.render_sprites) {
+
+    bSpriteZeroBeingRendered = false;
+
     for (int i = 0; i < sprite_count; i++) {
       if (spriteScanline[i].x == 0) {
         uint8_t fg_pixel_lo = (sprite_shifter_pattern_lo[i] & 0x80) > 0;
@@ -745,6 +751,10 @@ void ppu2C02::clock() {
         fg_priority = (spriteScanline[i].attribute & 0x20) == 0;
 
         if (fg_pixel != 0) {
+
+          if (i == 0) {
+            bSpriteZeroBeingRendered = true;
+          }
           break;
         }
       }
@@ -771,6 +781,26 @@ void ppu2C02::clock() {
     } else {
       pixel = bg_pixel;
       palette = bg_palette;
+    }
+
+    // Set the Sprite 0 Hit flag when Sprite 0 overlaps a non-transparent
+    // background pixel and the PPU's rendering conditions are satisfied.
+    //
+    // The game can detect this flag by reading the PPU status register ($2002)
+    // and decide whether to change scroll settings or perform other actions.
+    // Scroll changes are controlled by the game's code, executed by the CPU.
+    if (bSpriteZeroBeingRendered && bSpriteZeroHitPossible) {
+      if (mask.render_sprites && mask.render_background) {
+        if (~(mask.render_background_left | mask.render_sprites_left)) {
+          if (cycle >= 9 && cycle < 258) {
+            status.sprite_zero_hit = 1;
+          } else {
+            if (cycle >= 1 && cycle < 258) {
+              status.sprite_zero_hit = 1;
+            }
+          }
+        }
+      }
     }
   }
 
